@@ -1,10 +1,11 @@
-
 import { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, WidthType, AlignmentType, ImageRun, BorderStyle } from 'docx';
 import { ParseResult } from './parser/htmlParser';
 import { Question } from '@/components/QuestionDisplay';
 import { IMAGE_SRC_REGEX, stripHtmlForAI } from '@/utils/htmlUtils';
 import { containsMathExpression, renderMathToImage, extractMathExpressions } from '@/utils/mathRenderer';
 import { extractAllImages, base64ToUint8Array, fetchImageAsBuffer, scaleDimensions, convertSvgToPng } from '@/utils/imageExtractor';
+import citLogoPng from '@/assets/cit-logo.png';
+
 
 // Helper: get actual image dimensions from data URI or blob URL
 const getImageDimensions = (dataUrl: string): Promise<{ width: number; height: number }> => {
@@ -30,9 +31,10 @@ const scaleToFit = (width: number, height: number, maxWidth: number = 450): { wi
 };
 
 // Fetch the CIT logo as an ArrayBuffer
+// Uses the Vite-resolved import URL (works in both dev and production builds)
 const fetchLogo = async (): Promise<ArrayBuffer> => {
     try {
-        const response = await fetch('/src/assets/cit-logo.png');
+        const response = await fetch(citLogoPng);
         return await response.arrayBuffer();
     } catch (e) {
         console.warn('Could not fetch CIT logo, using empty buffer');
