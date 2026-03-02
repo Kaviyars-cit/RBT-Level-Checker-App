@@ -1,10 +1,12 @@
 import { ParseResult } from './parser/htmlParser';
 import { Question } from '@/components/QuestionDisplay';
+import citLogoPng from '@/assets/cit-logo.png';
 
 // Fetch the CIT logo as a data URL
+// Uses the Vite-resolved import URL (works in both dev and production builds)
 const fetchLogoAsDataUrl = async (): Promise<string> => {
     try {
-        const response = await fetch('/src/assets/cit-logo.png');
+        const response = await fetch(citLogoPng);
         const blob = await response.blob();
         return new Promise((resolve) => {
             const reader = new FileReader();
