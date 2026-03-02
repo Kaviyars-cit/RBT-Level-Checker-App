@@ -1,73 +1,102 @@
-# Welcome to your Lovable project
+# 📘 RBT-Level-Checker-App
 
-## Project info
+## 🔍 Overview
+The **RBT Level Checker App** is an intelligent educational support tool designed to automatically identify the **cognitive level** of a given question or statement based on **Revised Bloom’s Taxonomy (RBT)**.
 
-**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
+The application analyzes the structure and action verbs used in questions and classifies them into one of the six cognitive domains:
+**Remember, Understand, Apply, Analyze, Evaluate, and Create**.
 
-## How can I edit this code?
+This project is developed to assist educators, students, and academic institutions in ensuring **Outcome-Based Education (OBE)** compliance by verifying whether assessment questions are properly aligned with learning objectives and cognitive skill levels.
 
-There are several ways of editing your application.
+---
 
-**Use Lovable**
+## 🧠 What is Revised Bloom’s Taxonomy?
+Revised Bloom’s Taxonomy is a widely accepted educational framework used to categorize learning objectives based on cognitive complexity. It plays a vital role in modern education by helping in:
 
-Simply visit the [Levels Checker Project](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and start prompting.
+- Designing effective assessments  
+- Measuring higher-order thinking skills  
+- Aligning teaching strategies with learning outcomes  
+- Ensuring balanced cognitive-level evaluation  
 
-Changes made via Lovable will be committed automatically to this repo.
+### 🔢 Cognitive Levels in RBT
+1. **Remember** – Recall facts and basic concepts  
+2. **Understand** – Explain ideas or concepts  
+3. **Apply** – Use information in new situations  
+4. **Analyze** – Draw connections among ideas  
+5. **Evaluate** – Justify decisions or viewpoints  
+6. **Create** – Produce original work or solutions  
 
-**Use your preferred IDE**
+---
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+## 🎯 Project Objectives
+- Automate the identification of RBT levels in questions  
+- Support faculty in preparing balanced question papers  
+- Help students understand the cognitive demand of questions  
+- Assist institutions in OBE and accreditation processes  
+- Improve assessment quality and learning effectiveness  
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+---
 
-Follow these steps:
+## ✨ Key Features
+- 🔍 Automatic classification of questions using RBT  
+- 🧑‍🏫 Useful for educators and exam setters  
+- 🎓 Supports student learning analysis  
+- ⚡ Fast, simple, and lightweight application  
+- 🧩 Covers all six cognitive levels of Bloom’s Taxonomy  
 
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
+---
 
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
+## 🛠️ Technology Stack
+- **Frontend:** HTML, CSS, JavaScript  
+- **Core Logic:** Rule-based and keyword-based analysis  
+- **Platform:** Web Application  
+- **Version Control:** Git & GitHub  
 
-# Step 3: Install the necessary dependencies.
-npm i
+---
 
-# Step 4: Start the development server with auto-reloading and an instant preview.
-npm run dev
-```
+## ⚙️ How It Works
+1. User enters a question or statement into the app  
+2. The system scans for action verbs and sentence patterns  
+3. The question is matched against predefined RBT rules  
+4. The corresponding Bloom’s cognitive level is displayed  
 
-**Edit a file directly in GitHub**
+---
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+## 🎯 Use Cases
+- 📄 Question paper setting and verification  
+- 🏫 Academic audits and accreditation  
+- 🧠 Learning outcome evaluation  
+- 📊 Curriculum and syllabus design  
+- 🧪 Educational research and analysis  
 
-**Use GitHub Codespaces**
+---
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+## 🔮 Future Enhancements
+- 🤖 AI/ML-based semantic analysis  
+- 📂 Bulk question upload and evaluation  
+- 📊 Graphical visualization of RBT distribution  
+- 🌐 Multi-language support  
+- 🔐 Faculty login and role-based access  
+- 📱 Mobile-friendly and PWA support  
 
-## What technologies are used for this project?
+---
 
-This project is built with:
+## 📚 Educational Impact
+The **RBT Level Checker App** bridges the gap between educational theory and practical assessment design. By simplifying Bloom’s Taxonomy analysis, the project promotes higher-order thinking, improves assessment quality, and supports modern digital education systems.
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+---
 
-## How can I deploy this project?
+## 🤝 Contribution
+Contributions are welcome!  
+Feel free to fork this repository, raise issues, or submit pull requests to improve the application.
 
-Simply open [Levels Checker](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
+---
 
-## Can I connect a custom domain to my Lovable project?
+## 📜 License
+This project is developed for **educational and academic purposes**.
 
-Yes, you can!
+---
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
-
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+## ⭐ Acknowledgements
+- Revised Bloom’s Taxonomy framework  
+- Educators and institutions supporting Outcome-Based Education  
