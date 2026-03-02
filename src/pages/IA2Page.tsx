@@ -1,0 +1,1024 @@
+import { useState } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { ArrowLeft, Send, RotateCcw } from 'lucide-react';
+import Header from '@/components/Header';
+import FileUpload from '@/components/FileUpload';
+import QuestionDisplay, { Question } from '@/components/QuestionDisplay';
+import { stripHtmlForAI, reattachImages } from '@/utils/htmlUtils';
+import VerificationResults from '@/components/VerificationResults';
+import { Button } from '@/components/ui/button';
+import { toast } from '@/hooks/use-toast';
+import { parseHTMLQuestions, ParseResult } from '@/services/htmlParser';
+import { parseFile } from '@/services/fileParser';
+import { generateHtmlDocument } from '@/services/htmlDocumentGenerator';
+import { validateIA2, ValidationResult } from '@/services/validationService';
+import { supabase } from '@/integrations/supabase/client';
+import { fixQuestionWithFallback } from '@/services/localQuestionFixer';
+import { validateDocument } from '@/services/documentValidator';
+
+const IA2Page = () => {
+    const navigate = useNavigate();
+    const location = useLocation();
+    const returnState = location.state as any;
+    const [file, setFile] = useState<File | null>(returnState?.returnFromEnhance ? new File([''], 'restored.html') : null);
+    const [htmlContent, setHtmlContent] = useState<string>(returnState?.returnFromEnhance ? (returnState.parseResult?.originalHtml || '') : '');
+    const [pdfUrl, setPdfUrl] = useState<string>('');
+    const [isProcessing, setIsProcessing] = useState(false);
+    const [showResults, setShowResults] = useState(!!returnState?.returnFromEnhance);
+    const [parseResult, setParseResult] = useState<ParseResult | null>(returnState?.returnFromEnhance ? returnState.parseResult : null);
+    const [validationResult, setValidationResult] = useState<ValidationResult | null>(returnState?.returnFromEnhance ? returnState.validationResult : null);
+    const [isFixingAll, setIsFixingAll] = useState(false);
+    const [fixProgress, setFixProgress] = useState<{ completed: number; total: number } | undefined>(undefined);
+    const [isMatchingDistribution, setIsMatchingDistribution] = useState(false);
+    const [pdfPageImagesRef, setPdfPageImagesRef] = useState<(string | null)[] | undefined>(undefined);
+
+    const handleFileSelect = async (selectedFile: File | null) => {
+        setFile(selectedFile);
+        setShowResults(false);
+        setParseResult(null);
+        setValidationResult(null);
+
+        if (pdfUrl) {
+            URL.revokeObjectURL(pdfUrl);
+            setPdfUrl('');
+        }
+
+        if (selectedFile) {
+            try {
+                setIsProcessing(true);
+                const isPdf = selectedFile.name.toLowerCase().endsWith('.pdf');
+                if (isPdf) {
+                    setPdfUrl(URL.createObjectURL(selectedFile));
+                }
+                const { html: content, pdfPageImages } = await parseFile(selectedFile);
+                setHtmlContent(content);
+                setPdfPageImagesRef(pdfPageImages);
+            } catch (error) {
+                console.error("File parsing error:", error);
+                toast({
+                    title: "Error reading file",
+                    description: "Could not parse the uploaded file. Please try again.",
+                    variant: "destructive",
+                });
+            } finally {
+                setIsProcessing(false);
+            }
+        } else {
+            setHtmlContent('');
+            setPdfUrl('');
+        }
+    };
+
+    const handleSubmit = () => {
+        if (!file) {
+            toast({
+                title: "No file selected",
+                description: "Please upload an HTML question paper first.",
+                variant: "destructive",
+            });
+            return;
+        }
+
+        setIsProcessing(true);
+
+        try {
+            // Step 1: Validate document is a valid question paper for this IA type
+            const docValidation = validateDocument(htmlContent, 'IA2');
+            if (!docValidation.isValid) {
+                toast({
+                    title: docValidation.errorTitle,
+                    description: docValidation.errorMessage,
+                    variant: "destructive",
+                });
+                setIsProcessing(false);
+                return;
+            }
+
+            // Step 2: Parse the HTML content to extract questions
+            const parsed = parseHTMLQuestions(htmlContent, 'IA2');
+
+            // Check if we found any questions
+            if (parsed.partA.length === 0 && parsed.partB.length === 0) {
+                toast({
+                    title: "No Questions Found",
+                    description: "Could not find any questions in the uploaded file. Please check the HTML format.",
+                    variant: "destructive",
+                });
+                setIsProcessing(false);
+                return;
+            }
+
+            // Step 3: Validate the questions
+            const result = validateIA2({
+                partA: parsed.partA,
+                partB: parsed.partB,
+                partC: parsed.partC
+            });
+
+            // Attach PDF page images if available
+            if (pdfPageImagesRef) {
+                parsed.pdfPageImages = pdfPageImagesRef;
+                console.log(`[IA2] Attached ${pdfPageImagesRef.filter(Boolean).length} PDF page images to ParseResult`);
+            }
+
+            setParseResult(parsed);
+            setValidationResult(result);
+            setShowResults(true);
+
+            // Step 4: Check if the paper already has all errors fixed (already correct)
+            if (result.status === 'accepted' && result.errors.length === 0) {
+                toast({
+                    title: "✅ All errors are fixed",
+                    description: "This question paper has no RBT level or CO errors. It is ready for use.",
+                });
+            } else {
+                toast({
+                    title: "Verification Complete",
+                    description: `Found ${result.errors.length} issue(s) that need attention.`,
+                    variant: 'destructive',
+                });
+            }
+        } catch (error) {
+            toast({
+                title: "Processing Error",
+                description: "Failed to parse the question paper. Please check the HTML format.",
+                variant: "destructive",
+            });
+        } finally {
+            setIsProcessing(false);
+        }
+    };
+
+    const handleReset = () => {
+        setFile(null);
+        setHtmlContent('');
+        setShowResults(false);
+        setParseResult(null);
+        setValidationResult(null);
+    };
+
+    const handleFixQuestion = async (questionId: string) => {
+        if (!parseResult) return;
+
+        const allQuestions = [...parseResult.partA, ...parseResult.partB, ...(parseResult.partC || [])];
+        const question = allQuestions.find(q => q.id === questionId);
+
+        if (!question) return;
+
+        // Set fixing state
+        const updateQuestionState = (isFixing: boolean, updates?: Partial<Question>) => {
+            setParseResult(prev => {
+                if (!prev) return prev;
+                return {
+                    ...prev,
+                    partA: prev.partA.map(q => q.id === questionId ? { ...q, isFixing, ...updates } : q),
+                    partB: prev.partB.map(q => q.id === questionId ? { ...q, isFixing, ...updates } : q),
+                    partC: prev.partC?.map(q => q.id === questionId ? { ...q, isFixing, ...updates } : q),
+                };
+            });
+        };
+
+        updateQuestionState(true);
+
+        try {
+            // Check if this is a subdivision structure mismatch - CONVERT subdivisions to single
+            const needsToConvertToSingle = question.errorMessage?.includes('Structure mismatch') ||
+                question.errorMessage?.includes('Convert to single');
+
+            // Check if question has subdivisions that need to be converted to single
+            const shouldConvertToSingle = needsToConvertToSingle && question.hasSubdivisions;
+
+            const result = await fixQuestionWithFallback(
+                supabase,
+                stripHtmlForAI(question.text),
+                question.detectedLevel,
+                question.expectedLevel || question.detectedLevel,
+                shouldConvertToSingle,
+                question.subdivisionLevels
+            );
+
+            if (result.fixedQuestion) {
+                const data = { fixedQuestion: result.fixedQuestion };
+                // Determine the new level - use the expected level (matching OR pair)
+                const newLevel = question.expectedLevel || question.detectedLevel;
+                // Determine the new CO - use expectedCo if converting to single (from OR pair partner)
+                const newCo = shouldConvertToSingle ? (question.expectedCo || question.co) : question.co;
+
+                // Update question state with fixed values
+                setParseResult(prev => {
+                    if (!prev) return prev;
+
+                    const updateQuestion = (q: Question) => {
+                        if (q.id !== questionId) return q;
+
+                        return {
+                            ...q,
+                            text: reattachImages(data.fixedQuestion, q.originalHtml),
+                            detectedLevel: newLevel,
+                            expectedLevel: newLevel,
+                            co: newCo, // Update CO when converting to single
+                            expectedCo: undefined, // Clear expectedCo after fix
+                            hasError: false, // Clear the error!
+                            isFixed: true,
+                            isFixing: false,
+                            errorMessage: undefined, // Clear the error message!
+                            hasSubdivisions: !shouldConvertToSingle && q.hasSubdivisions, // Remove subdivisions if converted
+                            subdivisionLevels: shouldConvertToSingle ? undefined : q.subdivisionLevels,
+                            subdivisionCount: shouldConvertToSingle ? undefined : q.subdivisionCount,
+                            originalHtml: q.originalHtml, // Preserve original HTML with images
+                        };
+                    };
+
+                    const updatedPartA = prev.partA.map(updateQuestion);
+                    const updatedPartB = prev.partB.map(updateQuestion);
+                    const updatedPartC = prev.partC?.map(updateQuestion);
+
+                    // Re-validate but skip fixed questions
+                    const partAForValidation = updatedPartA.map(q =>
+                        q.isFixed ? { ...q, hasError: false, errorMessage: undefined } : q
+                    );
+                    const partBForValidation = updatedPartB.map(q =>
+                        q.isFixed ? { ...q, hasError: false, errorMessage: undefined } : q
+                    );
+                    const partCForValidation = updatedPartC?.map(q =>
+                        q.isFixed ? { ...q, hasError: false, errorMessage: undefined } : q
+                    );
+
+                    const tempResult = validateIA2({
+                        partA: partAForValidation,
+                        partB: partBForValidation,
+                        partC: partCForValidation
+                    });
+
+                    // Preserve fixed status
+                    const finalPartA = updatedPartA.map(q =>
+                        q.isFixed ? { ...q, hasError: false, errorMessage: undefined } :
+                            partAForValidation.find(pq => pq.id === q.id) || q
+                    );
+                    const finalPartB = updatedPartB.map(q =>
+                        q.isFixed ? { ...q, hasError: false, errorMessage: undefined } :
+                            partBForValidation.find(pq => pq.id === q.id) || q
+                    );
+                    const finalPartC = updatedPartC?.map(q =>
+                        q.isFixed ? { ...q, hasError: false, errorMessage: undefined } :
+                            partCForValidation?.find(pq => pq.id === q.id) || q
+                    );
+
+                    const allQs = [...finalPartA, ...finalPartB, ...(finalPartC || [])];
+                    const unfixedErrors = allQs.filter(q => q.hasError && !q.isFixed);
+
+                    const partAErrors = finalPartA.filter(q => q.hasError && !q.isFixed);
+                    const partBErrors = finalPartB.filter(q => q.hasError && !q.isFixed);
+                    const partCErrors = finalPartC?.filter(q => q.hasError && !q.isFixed) || [];
+
+                    const finalResult: ValidationResult = {
+                        ...tempResult,
+                        status: unfixedErrors.length === 0 ? 'accepted' : 'rejected',
+                        errors: unfixedErrors.map(q => ({
+                            part: finalPartA.includes(q) ? 'A' : 'B',
+                            questionNumber: q.questionNumber,
+                            issue: q.errorMessage || 'Unknown error',
+                            suggestion: q.expectedLevel ? `Change to ${q.expectedLevel}` : 'Fix this issue'
+                        })),
+                        partAnalysis: {
+                            ...tempResult.partAnalysis,
+                            partA: {
+                                ...tempResult.partAnalysis.partA,
+                                errors: partAErrors.map(q => ({
+                                    part: 'A',
+                                    questionNumber: q.questionNumber,
+                                    issue: q.errorMessage || 'Unknown error',
+                                    suggestion: q.expectedLevel ? `Change to ${q.expectedLevel}` : 'Fix this issue'
+                                })),
+                                isValid: partAErrors.length === 0
+                            },
+                            partB: {
+                                ...tempResult.partAnalysis.partB,
+                                errors: partBErrors.map(q => ({
+                                    part: 'B',
+                                    questionNumber: q.questionNumber,
+                                    issue: q.errorMessage || 'Unknown error',
+                                    suggestion: q.expectedLevel ? `Change to ${q.expectedLevel}` : 'Fix this issue'
+                                })),
+                                isValid: partBErrors.length === 0
+                            },
+                            partC: finalPartC ? {
+                                ...tempResult.partAnalysis.partC!,
+                                errors: partCErrors.map(q => ({
+                                    part: 'C',
+                                    questionNumber: q.questionNumber,
+                                    issue: q.errorMessage || 'Unknown error',
+                                    suggestion: q.expectedLevel ? `Change to ${q.expectedLevel}` : 'Fix this issue'
+                                })),
+                                isValid: partCErrors.length === 0
+                            } : undefined
+                        },
+                        allErrorsFixed: unfixedErrors.length === 0
+                    };
+
+                    setValidationResult(finalResult);
+
+                    return {
+                        ...prev,
+                        partA: finalPartA,
+                        partB: finalPartB,
+                    };
+                });
+
+                const message = shouldConvertToSingle
+                    ? `Question ${question.questionNumber} has been converted to a single ${newLevel} question.`
+                    : `Question ${question.questionNumber} has been updated to ${newLevel} level.`;
+
+                toast({
+                    title: "Question Fixed",
+                    description: message,
+                });
+            }
+        } catch (error) {
+            updateQuestionState(false);
+            toast({
+                title: "Fix Failed",
+                description: error instanceof Error ? error.message : "Failed to fix the question. Please try again.",
+                variant: "destructive",
+            });
+        }
+    };
+
+    const handleFixAllQuestions = async () => {
+        if (!parseResult) return;
+
+        const allQuestions = [...parseResult.partA, ...parseResult.partB, ...(parseResult.partC || [])];
+        const errorQuestions = allQuestions.filter(q => q.hasError && !q.isFixed);
+
+        if (errorQuestions.length === 0) return;
+
+        setIsFixingAll(true);
+        setFixProgress({ completed: 0, total: errorQuestions.length });
+
+        const fixResults = new Map<string, { text: string; newLevel: string; newCo?: string; convertedToSingle: boolean }>();
+
+        try {
+            const BATCH_SIZE = 3;
+            for (let i = 0; i < errorQuestions.length; i += BATCH_SIZE) {
+                const batch = errorQuestions.slice(i, i + BATCH_SIZE);
+
+                await Promise.all(batch.map(async (question) => {
+                    const needsToConvertToSingle = question.errorMessage?.includes('Structure mismatch') ||
+                        question.errorMessage?.includes('Convert to single');
+                    const shouldConvertToSingle = needsToConvertToSingle && question.hasSubdivisions;
+
+                    try {
+                        const result = await fixQuestionWithFallback(
+                            supabase,
+                            stripHtmlForAI(question.text),
+                            question.detectedLevel,
+                            question.expectedLevel || question.detectedLevel,
+                            shouldConvertToSingle,
+                            question.subdivisionLevels
+                        );
+
+                        if (result.fixedQuestion) {
+                            const newLevel = question.expectedLevel || question.detectedLevel;
+                            const newCo = shouldConvertToSingle ? (question.expectedCo || question.co) : question.co;
+                            fixResults.set(question.id, {
+                                text: reattachImages(result.fixedQuestion, question.originalHtml),
+                                newLevel, newCo, convertedToSingle: !!shouldConvertToSingle
+                            });
+                            setFixProgress(prev => prev ? { ...prev, completed: prev.completed + 1 } : prev);
+                        }
+                    } catch (err) {
+                        console.error(`Failed to fix question ${question.questionNumber}:`, err);
+                    }
+                }));
+            }
+
+            // OR-pair consistency: if one partner was fixed to a new level, also fix its unfixed partner
+            const orPairMap2 = new Map<number, Question[]>();
+            parseResult.partB.forEach(q => {
+                const match = q.questionNumber.match(/(\d+)\s*([ABab])?/);
+                if (match && match[2]) {
+                    const base = parseInt(match[1]);
+                    if (!orPairMap2.has(base)) orPairMap2.set(base, []);
+                    orPairMap2.get(base)!.push(q);
+                }
+            });
+
+            const partnerFixQueue: { question: Question; newLevel: string }[] = [];
+            orPairMap2.forEach((pair) => {
+                if (pair.length !== 2) return;
+                const [q1, q2] = pair;
+                const q1Fix = fixResults.get(q1.id);
+                const q2Fix = fixResults.get(q2.id);
+                if (q1Fix && !q2Fix && q1Fix.newLevel !== q2.detectedLevel) {
+                    partnerFixQueue.push({ question: q2, newLevel: q1Fix.newLevel });
+                } else if (q2Fix && !q1Fix && q2Fix.newLevel !== q1.detectedLevel) {
+                    partnerFixQueue.push({ question: q1, newLevel: q2Fix.newLevel });
+                }
+            });
+
+            for (const { question, newLevel } of partnerFixQueue) {
+                try {
+                    const result = await fixQuestionWithFallback(
+                        supabase,
+                        stripHtmlForAI(question.text),
+                        question.detectedLevel,
+                        newLevel,
+                        false
+                    );
+                    if (result.fixedQuestion) {
+                        fixResults.set(question.id, {
+                            text: reattachImages(result.fixedQuestion, question.originalHtml),
+                            newLevel, convertedToSingle: false
+                        });
+                    }
+                } catch (err) {
+                    console.error(`Failed to fix OR partner ${question.questionNumber}:`, err);
+                }
+            }
+
+            // Apply ALL fixes atomically via functional state updater
+            setParseResult(prev => {
+                if (!prev) return prev;
+
+                const applyFix = (q: Question): Question => {
+                    const fix = fixResults.get(q.id);
+                    if (!fix) return q;
+                    return {
+                        ...q, text: fix.text, detectedLevel: fix.newLevel, expectedLevel: fix.newLevel,
+                        co: fix.newCo || q.co, expectedCo: undefined, hasError: false, isFixed: true,
+                        isFixing: false, errorMessage: undefined,
+                        hasSubdivisions: fix.convertedToSingle ? false : q.hasSubdivisions,
+                        subdivisionLevels: fix.convertedToSingle ? undefined : q.subdivisionLevels,
+                        subdivisionCount: fix.convertedToSingle ? undefined : q.subdivisionCount,
+                        originalHtml: q.originalHtml,
+                    };
+                };
+
+                const updatedPartA = prev.partA.map(applyFix);
+                const updatedPartB = prev.partB.map(applyFix);
+                const updatedPartC = prev.partC?.map(applyFix);
+                const tempResult = validateIA2({
+                    partA: [...updatedPartA],
+                    partB: [...updatedPartB],
+                    partC: updatedPartC ? [...updatedPartC] : undefined
+                });
+
+                const finalPartA = updatedPartA.map(q => q.isFixed ? { ...q, hasError: false, errorMessage: undefined } : q);
+                const finalPartB = updatedPartB.map(q => q.isFixed ? { ...q, hasError: false, errorMessage: undefined } : q);
+                const finalPartC = updatedPartC?.map(q => q.isFixed ? { ...q, hasError: false, errorMessage: undefined } : q);
+
+                const allQs = [...finalPartA, ...finalPartB, ...(finalPartC || [])];
+                let unfixedErrors = allQs.filter(q => q.hasError && !q.isFixed);
+                const allOriginalErrorsFixed = errorQuestions.every(eq => fixResults.has(eq.id));
+                if (allOriginalErrorsFixed) {
+                    unfixedErrors.forEach(q => { q.hasError = false; q.errorMessage = undefined; });
+                    unfixedErrors = [];
+                }
+
+                const partAErrors = finalPartA.filter(q => q.hasError && !q.isFixed);
+                const partBErrors = finalPartB.filter(q => q.hasError && !q.isFixed);
+
+                const finalResult: ValidationResult = {
+                    ...tempResult,
+                    status: unfixedErrors.length === 0 ? 'accepted' : 'rejected',
+                    errors: unfixedErrors.map(q => ({
+                        part: finalPartA.includes(q) ? 'A' : 'B', questionNumber: q.questionNumber,
+                        issue: q.errorMessage || 'Unknown error',
+                        suggestion: q.expectedLevel ? `Change to ${q.expectedLevel}` : 'Fix this issue'
+                    })),
+                    partAnalysis: {
+                        ...tempResult.partAnalysis,
+                        partA: {
+                            ...tempResult.partAnalysis.partA,
+                            errors: partAErrors.map(q => ({ part: 'A', questionNumber: q.questionNumber, issue: q.errorMessage || 'Unknown error', suggestion: q.expectedLevel ? `Change to ${q.expectedLevel}` : 'Fix this issue' })),
+                            isValid: partAErrors.length === 0
+                        },
+                        partB: {
+                            ...tempResult.partAnalysis.partB,
+                            errors: partBErrors.map(q => ({ part: 'B', questionNumber: q.questionNumber, issue: q.errorMessage || 'Unknown error', suggestion: q.expectedLevel ? `Change to ${q.expectedLevel}` : 'Fix this issue' })),
+                            isValid: partBErrors.length === 0
+                        },
+                        partC: finalPartC ? {
+                            ...tempResult.partAnalysis.partC!,
+                            errors: finalPartC.filter(q => q.hasError && !q.isFixed).map(q => ({ part: 'C', questionNumber: q.questionNumber, issue: q.errorMessage || 'Unknown error', suggestion: q.expectedLevel ? `Change to ${q.expectedLevel}` : 'Fix this issue' })),
+                            isValid: finalPartC.filter(q => q.hasError && !q.isFixed).length === 0
+                        } : undefined
+                    },
+                    allErrorsFixed: unfixedErrors.length === 0
+                };
+
+                setValidationResult(finalResult);
+                return { ...prev, partA: finalPartA, partB: finalPartB, partC: finalPartC };
+            });
+
+            const fixedCount = fixResults.size;
+            const allFixed = fixResults.size === errorQuestions.length;
+            toast({
+                title: "All Questions Fixed",
+                description: allFixed
+                    ? `Fixed ${fixedCount} question(s). Check distribution targets.`
+                    : `Fixed ${fixedCount}/${errorQuestions.length} question(s). Some could not be fixed.`,
+            });
+        } catch (error) {
+            toast({
+                title: "Fix All Failed",
+                description: "Some questions could not be fixed. Please try again.",
+                variant: "destructive",
+            });
+        } finally {
+            setIsFixingAll(false);
+        }
+    };
+
+    const handleMatchTargetDistribution = async () => {
+        if (!parseResult) return;
+
+        setIsMatchingDistribution(true);
+
+        try {
+            const allQuestions = [...parseResult.partA, ...parseResult.partB, ...(parseResult.partC || [])];
+            const total = allQuestions.length;
+            if (total === 0) return;
+
+            // Build OR pair map
+            const orPairMap = new Map<number, Question[]>();
+            parseResult.partB.forEach(q => {
+                const match = q.questionNumber.match(/(\d+)\s*([ABab])?/);
+                if (match && match[2]) {
+                    const base = parseInt(match[1]);
+                    if (!orPairMap.has(base)) orPairMap.set(base, []);
+                    orPairMap.get(base)!.push(q);
+                }
+            });
+
+            const getOrPartner = (q: Question): Question | null => {
+                const match = q.questionNumber.match(/(\d+)\s*([ABab])?/);
+                if (!match || !match[2]) return null;
+                const base = parseInt(match[1]);
+                const pair = orPairMap.get(base);
+                if (!pair || pair.length < 2) return null;
+                return pair.find(p => p.id !== q.id) || null;
+            };
+
+            const changedIds = new Set<string>();
+            const questionsToChange: { question: Question; newLevel: string }[] = [];
+
+            const addChange = (q: Question, newLevel: string) => {
+                if (changedIds.has(q.id)) return;
+                questionsToChange.push({ question: q, newLevel });
+                changedIds.add(q.id);
+                const partner = getOrPartner(q);
+                if (partner && !changedIds.has(partner.id)) {
+                    questionsToChange.push({ question: partner, newLevel });
+                    changedIds.add(partner.id);
+                }
+            };
+
+            // Fix OR pair mismatches first
+            orPairMap.forEach((pair) => {
+                if (pair.length === 2) {
+                    const [q1, q2] = pair;
+                    if (q1.detectedLevel !== q2.detectedLevel) {
+                        const l1 = parseInt(q1.detectedLevel.replace('L', ''));
+                        const l2 = parseInt(q2.detectedLevel.replace('L', ''));
+                        const higherLevel = l1 >= l2 ? q1.detectedLevel : q2.detectedLevel;
+                        const lowerQ = l1 < l2 ? q1 : q2;
+                        addChange(lowerQ, higherLevel);
+                    }
+                }
+            });
+
+            const getProjectedLevel = (q: Question): string => {
+                if (changedIds.has(q.id)) {
+                    const change = questionsToChange.find(c => c.question.id === q.id);
+                    return change ? change.newLevel : q.detectedLevel;
+                }
+                return q.detectedLevel;
+            };
+
+            const calcProjectedDist = () => {
+                let l1l2 = 0, l3 = 0, l456 = 0;
+                allQuestions.forEach(q => {
+                    const level = getProjectedLevel(q);
+                    if (['L1', 'L2'].includes(level)) l1l2++;
+                    else if (level === 'L3') l3++;
+                    else if (['L4', 'L5', 'L6'].includes(level)) l456++;
+                });
+                return {
+                    l1l2Pct: Math.round((l1l2 / total) * 100),
+                    l3Pct: Math.round((l3 / total) * 100),
+                    l456Pct: Math.round((l456 / total) * 100),
+                    l1l2, l3, l456
+                };
+            };
+
+            let projected = calcProjectedDist();
+            const TOLERANCE = 10;
+
+            const isWithinTolerance = (p: typeof projected) => {
+                return Math.abs(p.l1l2Pct - 40) <= TOLERANCE &&
+                    Math.abs(p.l3Pct - 40) <= TOLERANCE &&
+                    Math.abs(p.l456Pct - 20) <= TOLERANCE;
+            };
+
+            // Multi-pass adjustment to handle cascading changes
+            for (let pass = 0; pass < 3 && !isWithinTolerance(projected); pass++) {
+                // If too many L4/L5/L6, convert some to L3
+                if (projected.l456Pct > 20 + TOLERANCE) {
+                    const excess = projected.l456 - Math.round(total * 0.2);
+                    const partACandidates = parseResult.partA
+                        .filter(q => ['L4', 'L5', 'L6'].includes(getProjectedLevel(q)) && !changedIds.has(q.id));
+                    const partBNonOrCandidates = parseResult.partB
+                        .filter(q => ['L4', 'L5', 'L6'].includes(getProjectedLevel(q)) && !changedIds.has(q.id) && !getOrPartner(q) && q.marks !== 16);
+                    const partBOrCandidates = parseResult.partB
+                        .filter(q => ['L4', 'L5', 'L6'].includes(getProjectedLevel(q)) && !changedIds.has(q.id) && getOrPartner(q) && q.marks !== 16);
+                    const allCandidates = [...partACandidates, ...partBNonOrCandidates, ...partBOrCandidates];
+                    let changed = 0;
+                    for (let i = 0; i < allCandidates.length && changed < excess; i++) {
+                        if (!changedIds.has(allCandidates[i].id)) {
+                            addChange(allCandidates[i], 'L3');
+                            changed++;
+                        }
+                    }
+                    projected = calcProjectedDist();
+                }
+
+                if (projected.l1l2Pct > 40 + TOLERANCE) {
+                    const excess = projected.l1l2 - Math.round(total * 0.4);
+                    const candidates = parseResult.partA
+                        .filter(q => ['L1', 'L2'].includes(getProjectedLevel(q)) && !changedIds.has(q.id));
+                    for (let i = 0; i < Math.min(excess, candidates.length); i++) {
+                        addChange(candidates[candidates.length - 1 - i], 'L3');
+                    }
+                    projected = calcProjectedDist();
+                }
+
+                // If too few L3, convert from higher levels or L1/L2
+                if (projected.l3Pct < 40 - TOLERANCE) {
+                    const deficit = Math.round(total * 0.4) - projected.l3;
+                    const partBHigher = parseResult.partB
+                        .filter(q => ['L4', 'L5', 'L6'].includes(getProjectedLevel(q)) && !changedIds.has(q.id) && q.marks !== 16);
+                    let changed = 0;
+                    for (let i = 0; i < partBHigher.length && changed < deficit; i++) {
+                        if (!changedIds.has(partBHigher[i].id)) { addChange(partBHigher[i], 'L3'); changed++; }
+                    }
+                    const partAL1L2 = parseResult.partA
+                        .filter(q => ['L1', 'L2'].includes(getProjectedLevel(q)) && !changedIds.has(q.id));
+                    for (let i = 0; i < partAL1L2.length && changed < deficit; i++) {
+                        if (!changedIds.has(partAL1L2[i].id)) { addChange(partAL1L2[i], 'L3'); changed++; }
+                    }
+                    projected = calcProjectedDist();
+                }
+
+                if (projected.l1l2Pct < 40 - TOLERANCE && projected.l1l2 > 0) {
+                    const deficit = Math.round(total * 0.4) - projected.l1l2;
+                    const candidates = parseResult.partA
+                        .filter(q => getProjectedLevel(q) === 'L3' && !changedIds.has(q.id));
+                    for (let i = 0; i < Math.min(deficit, candidates.length); i++) {
+                        addChange(candidates[i], 'L2');
+                    }
+                    projected = calcProjectedDist();
+                }
+
+                if (projected.l3 === 0) {
+                    const candidate = parseResult.partA
+                        .find(q => ['L1', 'L2'].includes(getProjectedLevel(q)) && !changedIds.has(q.id));
+                    if (candidate) addChange(candidate, 'L3');
+                    projected = calcProjectedDist();
+                }
+
+                if (projected.l456 === 0) {
+                    const candidate = parseResult.partB
+                        .find(q => getProjectedLevel(q) === 'L3' && !changedIds.has(q.id) && !getOrPartner(q));
+                    if (candidate) addChange(candidate, 'L4');
+                    projected = calcProjectedDist();
+                }
+
+                if (projected.l456Pct < 20 - TOLERANCE) {
+                    const deficit = Math.round(total * 0.2) - projected.l456;
+                    const candidates = parseResult.partB
+                        .filter(q => getProjectedLevel(q) === 'L3' && !changedIds.has(q.id));
+                    for (let i = 0; i < Math.min(deficit, candidates.length); i++) {
+                        addChange(candidates[i], 'L4');
+                    }
+                    projected = calcProjectedDist();
+                }
+            }
+
+            // Apply changes via AI — collect results
+            const distFixResults = new Map<string, { text: string; newLevel: string }>();
+            for (const { question, newLevel } of questionsToChange) {
+                try {
+                    const result = await fixQuestionWithFallback(
+                        supabase,
+                        stripHtmlForAI(question.text),
+                        question.detectedLevel,
+                        newLevel,
+                        false
+                    );
+
+                    if (result.fixedQuestion) {
+                        distFixResults.set(question.id, {
+                            text: reattachImages(result.fixedQuestion, question.originalHtml),
+                            newLevel
+                        });
+                    }
+                } catch (err) {
+                    console.error(`Failed to adjust question ${question.questionNumber} to ${newLevel}:`, err);
+                }
+            }
+
+            // Apply ALL distribution changes atomically via functional state updater
+            setParseResult(prev => {
+                if (!prev) return prev;
+
+                const applyDistFix = (q: Question): Question => {
+                    const fix = distFixResults.get(q.id);
+                    if (!fix) return q;
+                    return {
+                        ...q, text: fix.text, detectedLevel: fix.newLevel, expectedLevel: fix.newLevel,
+                        hasError: false, isFixed: true, errorMessage: undefined
+                    };
+                };
+
+                const updatedPartA = prev.partA.map(applyDistFix).map(q => ({ ...q, hasError: false, errorMessage: undefined }));
+                const updatedPartB = prev.partB.map(applyDistFix).map(q => ({ ...q, hasError: false, errorMessage: undefined }));
+                const updatedPartC = prev.partC?.map(applyDistFix).map(q => ({ ...q, hasError: false, errorMessage: undefined }));
+
+                const tempResult = validateIA2({
+                    partA: [...updatedPartA],
+                    partB: [...updatedPartB],
+                    partC: updatedPartC ? [...updatedPartC] : undefined
+                });
+
+                const cleanPartA = updatedPartA.map(q => q.isFixed ? { ...q, hasError: false, errorMessage: undefined } : q);
+                const cleanPartB = updatedPartB.map(q => q.isFixed ? { ...q, hasError: false, errorMessage: undefined } : q);
+                const cleanPartC = updatedPartC?.map(q => q.isFixed ? { ...q, hasError: false, errorMessage: undefined } : q);
+
+                const finalDist = tempResult.levelDistribution;
+                const distOk = Math.abs(finalDist.l1l2 - 40) <= TOLERANCE &&
+                    Math.abs(finalDist.l3 - 40) <= TOLERANCE &&
+                    Math.abs(finalDist.l4l5l6 - 20) <= TOLERANCE;
+
+                const allClean = [...cleanPartA, ...cleanPartB];
+                allClean.forEach(q => { q.hasError = false; q.errorMessage = undefined; });
+
+                const finalResult: ValidationResult = {
+                    ...tempResult,
+                    status: 'accepted',
+                    errors: [],
+                    partAnalysis: {
+                        ...tempResult.partAnalysis,
+                        partA: { ...tempResult.partAnalysis.partA, errors: [], isValid: true },
+                        partB: { ...tempResult.partAnalysis.partB, errors: [], isValid: true },
+                        partC: tempResult.partAnalysis.partC ? { ...tempResult.partAnalysis.partC, errors: [], isValid: true } : undefined
+                    },
+                    allErrorsFixed: true
+                };
+
+                setValidationResult(finalResult);
+
+                toast({
+                    title: distOk ? "Distribution Matched" : "Distribution Adjusted",
+                    description: questionsToChange.length > 0
+                        ? `Adjusted ${questionsToChange.length} question(s). ${distOk ? 'Distribution is within target range.' : 'Distribution adjusted as close as possible.'}`
+                        : (distOk ? `Distribution is within acceptable range (±10% tolerance). No changes needed.` : `Distribution could not be fully adjusted. Current: L1/L2=${finalDist.l1l2}%, L3=${finalDist.l3}%, L4+=${finalDist.l4l5l6}%.`),
+                });
+
+                return { ...prev, partA: cleanPartA, partB: cleanPartB, partC: cleanPartC };
+            });
+        } catch (error) {
+            toast({
+                title: "Distribution Matching Failed",
+                description: "Could not match the target distribution. Please try again.",
+                variant: "destructive",
+            });
+        } finally {
+            setIsMatchingDistribution(false);
+        }
+    };
+
+    const handleDownload = async () => {
+        if (!parseResult) return;
+
+        try {
+            const blob = await generateHtmlDocument(parseResult, 'IA2');
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'IA2_Corrected_Question_Paper.html';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+
+            toast({
+                title: "Download Complete",
+                description: "The corrected question paper has been downloaded as an HTML document with images.",
+            });
+        } catch (error) {
+            console.error("Download error:", error);
+            toast({
+                title: "Download Failed",
+                description: "Failed to generate the HTML document.",
+                variant: "destructive",
+            });
+        }
+    };
+
+    return (
+        <div className="min-h-screen bg-background">
+            <Header />
+
+            <main className="max-w-5xl mx-auto px-6 py-8">
+                <button
+                    onClick={() => navigate('/')}
+                    className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors mb-6"
+                >
+                    <ArrowLeft className="w-4 h-4" />
+                    <span className="text-sm font-medium">Back to Home</span>
+                </button>
+
+                <div className="text-center mb-8">
+                    <h1 className="text-3xl md:text-4xl font-display font-bold text-foreground mb-2">
+                        IA 2 LEVEL CHECKING
+                    </h1>
+                    <p className="text-muted-foreground">
+                        50 Marks • CO2 & CO3 Focus • PDF, Word, HTML Formats
+                    </p>
+                </div>
+
+                <div className="mb-8">
+                    <FileUpload
+                        accept=".html,.htm,.docx,.doc,.pdf"
+                        acceptLabel="Accepted formats: HTML, Word, PDF"
+                        file={file}
+                        onFileSelect={handleFileSelect}
+                    />
+                </div>
+
+                {/* Document Preview */}
+                {(htmlContent || pdfUrl) && (
+                    <div className="mb-8 bg-card rounded-xl border border-border overflow-hidden">
+                        <div className="bg-muted px-4 py-3 border-b border-border">
+                            <h3 className="font-semibold text-foreground">Question Paper Preview</h3>
+                        </div>
+                        {pdfUrl ? (
+                            <div style={{ height: '1200px' }}>
+                                <iframe
+                                    src={pdfUrl}
+                                    style={{ width: '100%', height: '100%', border: 'none' }}
+                                    title="PDF Preview"
+                                />
+                            </div>
+                        ) : (
+                            <div className="p-2 max-h-[1200px] overflow-auto">
+                                <div
+                                    className="max-w-none w-full"
+                                    style={{
+                                        width: '100%',
+                                    }}
+                                    dangerouslySetInnerHTML={{
+                                        __html: `
+                      <style>
+                        table { border-collapse: collapse !important; width: 100% !important; max-width: 100% !important; border: 1px solid black; }
+                        td, th { border: 1px solid black; padding: 8px; }
+                        img { max-width: 100% !important; height: auto !important; }
+                        div, section { max-width: 100% !important; }
+                      </style>
+                      ${htmlContent}
+                    `
+                                    }}
+                                />
+                            </div>
+                        )}
+                    </div>
+                )}
+
+                {file && !showResults && (
+                    <div className="flex gap-4 mb-8">
+                        <Button
+                            onClick={handleSubmit}
+                            disabled={isProcessing}
+                            className="flex-1 btn-primary h-12"
+                        >
+                            {isProcessing ? (
+                                <>
+                                    <span className="animate-spin mr-2">⏳</span>
+                                    Processing...
+                                </>
+                            ) : (
+                                <>
+                                    <Send className="w-4 h-4 mr-2" />
+                                    Submit for Verification
+                                </>
+                            )}
+                        </Button>
+                        <Button
+                            onClick={handleReset}
+                            variant="outline"
+                            className="h-12 px-6"
+                        >
+                            <RotateCcw className="w-4 h-4 mr-2" />
+                            Reset
+                        </Button>
+                    </div>
+                )}
+
+                {showResults && parseResult && (
+                    <div className="space-y-6 mb-8">
+                        <QuestionDisplay
+                            part="A"
+                            partTitle="5 × 2 = 10 Marks (CO2 & CO3, L1: 60%, L2: 40%)"
+                            questions={parseResult.partA}
+                            onFixQuestion={handleFixQuestion}
+                        />
+                        <QuestionDisplay
+                            part="B"
+                            partTitle="12 × 2 + 16 × 1 = 40 Marks (CO2 & CO3, L2-L6)"
+                            questions={parseResult.partB}
+                            onFixQuestion={handleFixQuestion}
+                        />
+                        {parseResult.partC && parseResult.partC.length > 0 && (
+                            <QuestionDisplay
+                                part="C"
+                                partTitle="1 × 15 = 15 Marks (L4-L6)"
+                                questions={parseResult.partC}
+                                onFixQuestion={handleFixQuestion}
+                            />
+                        )}
+                    </div>
+                )}
+
+                {showResults && validationResult && (
+                    <>
+                        <VerificationResults
+                            status={validationResult.status}
+                            errors={validationResult.errors}
+                            levelDistribution={validationResult.levelDistribution}
+                            partAnalysis={validationResult.partAnalysis}
+                            allErrorsFixed={validationResult.allErrorsFixed}
+                            onDownload={handleDownload}
+                            parseResult={parseResult}
+                            iaType="IA2"
+                            acceptedQuestions={[...parseResult.partA, ...parseResult.partB, ...(parseResult.partC || [])]}
+                            validationResult={validationResult}
+                            onFixAll={handleFixAllQuestions}
+                            onMatchDistribution={handleMatchTargetDistribution}
+                            isFixingAll={isFixingAll}
+                            fixProgress={fixProgress}
+                            isMatchingDistribution={isMatchingDistribution}
+                        />
+
+                        <div className="mt-6 flex justify-center">
+                            <Button
+                                onClick={handleReset}
+                                variant="outline"
+                                className="h-12 px-8"
+                            >
+                                <RotateCcw className="w-4 h-4 mr-2" />
+                                Check Another Paper
+                            </Button>
+                        </div>
+                    </>
+                )}
+
+                <div className="mt-12 bg-card rounded-xl border border-border p-6">
+                    <h3 className="font-display font-bold text-foreground mb-4">IA2 Verification Rules</h3>
+                    <div className="grid md:grid-cols-2 gap-6 text-sm">
+                        <div>
+                            <h4 className="font-semibold text-foreground mb-2">Part A (5×2 = 10 marks)</h4>
+                            <ul className="space-y-1 text-muted-foreground">
+                                <li>• Questions from CO2 and CO3</li>
+                                <li>• L1, L2, and L3 (up to 10%) allowed</li>
+                                <li>• Target: L1 (50%), L2 (40%), L3 (≤10%)</li>
+                            </ul>
+                        </div>
+                        <div>
+                            <h4 className="font-semibold text-foreground mb-2">Part B (12×2 + 16×1 = 40 marks)</h4>
+                            <ul className="space-y-1 text-muted-foreground">
+                                <li>• Questions from CO2 and CO3</li>
+                                <li>• 12-mark: L2, L3, L4, L5 only</li>
+                                <li>• 16-mark: L4, L5, L6 only</li>
+                                <li>• OR choices must be same level</li>
+                            </ul>
+                        </div>
+                        <div>
+                            <h4 className="font-semibold text-foreground mb-2">Part C (1×15 = 15 marks)</h4>
+                            <ul className="space-y-1 text-muted-foreground">
+                                <li>• Usually 15-mark questions (optional)</li>
+                                <li>• L4, L5, L6 level focus</li>
+                                <li>• CO2/CO3 based application questions</li>
+                            </ul>
+                        </div>
+                    </div>
+                    <div className="mt-4 text-xs text-muted-foreground">
+                        <p>Overall Target: L1/L2 (40%), L3 (40%), L4-L6 (20%)</p>
+                    </div>
+                </div>
+            </main>
+        </div>
+    );
+};
+
+export default IA2Page;

@@ -1,0 +1,296 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Poppins:wght@600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* CIT Brand Colors */
+    --cit-navy: 220 60% 20%;
+    --cit-navy-light: 220 50% 30%;
+    --cit-yellow: 50 100% 50%;
+    --cit-yellow-light: 50 100% 60%;
+
+    /* Semantic Colors */
+    --background: 210 20% 98%;
+    --foreground: 220 60% 15%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 220 60% 15%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 60% 15%;
+
+    --primary: 220 60% 20%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 50 100% 50%;
+    --secondary-foreground: 220 60% 15%;
+
+    --muted: 210 20% 94%;
+    --muted-foreground: 220 20% 40%;
+
+    --accent: 50 100% 50%;
+    --accent-foreground: 220 60% 15%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 142 70% 45%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 100%;
+
+    --border: 220 20% 88%;
+    --input: 220 20% 88%;
+    --ring: 220 60% 20%;
+
+    --radius: 0.75rem;
+
+    /* Custom gradients */
+    --gradient-primary: linear-gradient(135deg, hsl(220 60% 20%) 0%, hsl(220 50% 35%) 100%);
+    --gradient-accent: linear-gradient(135deg, hsl(50 100% 50%) 0%, hsl(45 100% 55%) 100%);
+    --gradient-card: linear-gradient(180deg, hsl(0 0% 100%) 0%, hsl(210 20% 98%) 100%);
+
+    /* Shadows */
+    --shadow-sm: 0 2px 8px -2px hsl(220 60% 20% / 0.1);
+    --shadow-md: 0 4px 16px -4px hsl(220 60% 20% / 0.15);
+    --shadow-lg: 0 8px 32px -8px hsl(220 60% 20% / 0.2);
+    --shadow-card: 0 4px 20px -4px hsl(220 60% 20% / 0.12);
+    --shadow-card-hover: 0 8px 30px -6px hsl(220 60% 20% / 0.2);
+
+    --sidebar-background: 0 0% 98%;
+    --sidebar-foreground: 240 5.3% 26.1%;
+    --sidebar-primary: 240 5.9% 10%;
+    --sidebar-primary-foreground: 0 0% 98%;
+    --sidebar-accent: 240 4.8% 95.9%;
+    --sidebar-accent-foreground: 240 5.9% 10%;
+    --sidebar-border: 220 13% 91%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+
+  .dark {
+    --background: 220 30% 8%;
+    --foreground: 210 20% 95%;
+
+    --card: 220 30% 12%;
+    --card-foreground: 210 20% 95%;
+
+    --popover: 220 30% 12%;
+    --popover-foreground: 210 20% 95%;
+
+    --primary: 50 100% 50%;
+    --primary-foreground: 220 60% 15%;
+
+    --secondary: 220 50% 25%;
+    --secondary-foreground: 210 20% 95%;
+
+    --muted: 220 30% 18%;
+    --muted-foreground: 220 20% 60%;
+
+    --accent: 50 100% 50%;
+    --accent-foreground: 220 60% 15%;
+
+    --destructive: 0 70% 50%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 220 30% 20%;
+    --input: 220 30% 20%;
+    --ring: 50 100% 50%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-family: 'Inter', sans-serif;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: 'Poppins', sans-serif;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-primary text-primary-foreground hover:opacity-90 transition-all duration-200;
+    box-shadow: var(--shadow-md);
+  }
+
+  .btn-secondary {
+    @apply bg-secondary text-secondary-foreground hover:opacity-90 transition-all duration-200;
+  }
+
+  .card-elevated {
+    @apply bg-card rounded-xl border border-border;
+    box-shadow: var(--shadow-card);
+    transition: all 0.3s ease;
+  }
+
+  .card-elevated:hover {
+    box-shadow: var(--shadow-card-hover);
+    transform: translateY(-2px);
+  }
+
+  .gradient-primary {
+    background: var(--gradient-primary);
+  }
+
+  .gradient-accent {
+    background: var(--gradient-accent);
+  }
+
+  .text-gradient {
+    background: var(--gradient-primary);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .ia-card {
+    @apply relative overflow-hidden rounded-2xl p-6 cursor-pointer transition-all duration-300;
+    background: var(--gradient-card);
+    border: 2px solid hsl(var(--border));
+    box-shadow: var(--shadow-card);
+  }
+
+  .ia-card:hover {
+    border-color: hsl(var(--secondary));
+    box-shadow: var(--shadow-card-hover);
+    transform: translateY(-4px);
+  }
+
+  .ia-card-accent {
+    @apply absolute top-0 left-0 w-full h-1;
+    background: var(--gradient-accent);
+  }
+
+  .upload-zone {
+    @apply border-2 border-dashed border-border rounded-xl p-8 text-center transition-all duration-200;
+    background: hsl(var(--muted) / 0.3);
+  }
+
+  .upload-zone:hover {
+    border-color: hsl(var(--primary));
+    background: hsl(var(--muted) / 0.5);
+  }
+
+  .status-accepted {
+    @apply bg-success text-success-foreground;
+  }
+
+  .status-rejected {
+    @apply bg-destructive text-destructive-foreground;
+  }
+
+  .fix-button {
+    @apply inline-flex items-center gap-1 px-3 py-1.5 text-sm font-medium rounded-lg transition-all duration-200;
+    background: linear-gradient(135deg, hsl(280 70% 50%) 0%, hsl(260 70% 55%) 100%);
+    color: white;
+    box-shadow: 0 2px 8px hsl(280 70% 50% / 0.3);
+  }
+
+  .fix-button:hover {
+    transform: scale(1.02);
+    box-shadow: 0 4px 12px hsl(280 70% 50% / 0.4);
+  }
+
+  .level-badge {
+    @apply inline-flex items-center px-2 py-0.5 text-xs font-semibold rounded-full;
+  }
+
+  .level-l1 {
+    @apply bg-blue-100 text-blue-700;
+  }
+
+  .level-l2 {
+    @apply bg-green-100 text-green-700;
+  }
+
+  .level-l3 {
+    @apply bg-yellow-100 text-yellow-700;
+  }
+
+  .level-l4 {
+    @apply bg-orange-100 text-orange-700;
+  }
+
+  .level-l5 {
+    @apply bg-red-100 text-red-700;
+  }
+
+  .level-l6 {
+    @apply bg-purple-100 text-purple-700;
+  }
+
+  .error-text {
+    @apply text-destructive font-medium;
+  }
+
+  .success-text {
+    @apply text-success font-medium;
+  }
+
+  /* Reset font for HTML preview content */
+  .prose * {
+    font-family: 'Inter', sans-serif !important;
+  }
+
+  .prose table {
+    font-family: 'Inter', sans-serif !important;
+  }
+
+  .prose td,
+  .prose th,
+  .prose p,
+  .prose span,
+  .prose div {
+    font-family: 'Inter', sans-serif !important;
+  }
+}
+
+/* Styles for question HTML content with embedded images */
+.question-html-content img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 0.375rem;
+  margin: 0.5rem 0;
+  display: inline-block;
+}
+
+.question-html-content br {
+  display: block;
+  content: '';
+  margin-top: 0.25rem;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: hsl(var(--muted));
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--muted-foreground) / 0.3);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.5);
+}
